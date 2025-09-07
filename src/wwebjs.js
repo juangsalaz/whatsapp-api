@@ -1,9 +1,7 @@
-import { Client, LocalAuth, MessageMedia } from 'whatsapp-web.js';
+import pkg from 'whatsapp-web.js';
+const { Client, LocalAuth, MessageMedia } = pkg;
 
-const QR_STORE = {
-  lastQr: null,
-  timestamp: null
-};
+const QR_STORE = { lastQr: null, timestamp: null };
 
 export function createClient({ sessionDir = '.wwebjs_auth', puppeteerArgs = [], headless = true } = {}) {
   const client = new Client({
