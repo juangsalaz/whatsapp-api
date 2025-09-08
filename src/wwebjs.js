@@ -53,12 +53,8 @@ export function createClient({
   client.on('authenticated', () => {
     console.log('[wwebjs] AUTHENTICATED');
     clearQr();
-    // Pancing WA Web lanjut loading
-    client.getChats().then(
-      () => console.log('[wwebjs] Prefetch chats ok'),
-      (e) => console.warn('[wwebjs] Prefetch chats fail:', e?.message)
-    );
   });
+
 
   client.on('disconnected', (reason) => {
     console.error('[wwebjs] DISCONNECTED:', reason);
@@ -76,20 +72,19 @@ export function createClient({
 export async function sendTextToPhone(client, phoneE164, message) {
   const clean = String(phoneE164).replace(/\D/g, '');
 
-  // 1) Pastikan nomor valid & dapatkan JID resmi
+  // Pastikan nomor valid & dapatkan JID
   const numberId = await client.getNumberId(clean).catch(() => null);
   if (!numberId) throw new Error(`Nomor ${phoneE164} tidak ditemukan / tidak terdaftar di WhatsApp`);
-  const jid = numberId._serialized; // e.g. 62812xxxxx@c.us
+  const jid = numberId._serialized;
 
-  // 2) Retry kirim kalau kena error "getChat"/evaluation (DOM WA belum siap)
-  const MAX_RETRY = 5;
-  const SLEEP_MS = 1200;
-
+  const MAX_RETRY = 10;
+  let delay = 800; // ms
   let lastErr;
+
   for (let i = 0; i < MAX_RETRY; i++) {
     try {
-      // optional: pancing WA Web “bangun”
-      await client.getState(); // noop tapi memastikan koneksi aktif
+      // ping state (tetap ringan)
+      await client.getState().catch(() => {});
       return await client.sendMessage(jid, message);
     } catch (e) {
       lastErr = e;
@@ -97,16 +92,30 @@ export async function sendTextToPhone(client, phoneE164, message) {
       const transient =
         msg.includes('getChat') ||
         msg.includes('Evaluation failed') ||
-        msg.includes('Attempting to use a disconnected port');
+        msg.includes('disconnected port') ||
+        msg.includes('not ready') ||
+        msg.includes('TypeError');
 
-      if (!transient || i === MAX_RETRY - 1) {
-        throw e; // bukan error transien, atau sudah habis retry
+      if (!transient && !msg.includes('Evaluation')) {
+        // error non-transien → lempar langsung
+        throw e;
       }
-      await new Promise((r) => setTimeout(r, SLEEP_MS));
+
+      // retry dengan exponential backoff
+      await new Promise(r => setTimeout(r, delay));
+      delay = Math.min(delay * 1.5, 4000);
     }
   }
-  throw lastErr;
+
+  // Jika tetap gagal berkali-kali → soft reinit tanpa hapus sesi
+  try {
+    console.warn('[wwebjs] Send failed repeatedly. Soft reinit...');
+    await client.destroy();
+  } catch {}
+  client.initialize();
+  throw new Error('Koneksi WA belum siap (soft reinit dilakukan). Coba lagi sebentar.');
 }
+
 
 export async function findGroupBy({ client, groupId, groupName }) {
   if (groupId) {
