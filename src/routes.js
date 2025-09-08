@@ -1,8 +1,10 @@
 import express from 'express';
 import QRCode from 'qrcode';
+import { isQrActive } from './wwebjs.js'; // <-- tambahkan
 
 export function buildRouter({ client, QR_STORE, apiKey }) {
   const router = express.Router();
+
 
   // Middleware API key (simple)
   router.use((req, res, next) => {
@@ -19,19 +21,22 @@ export function buildRouter({ client, QR_STORE, apiKey }) {
     res.json({
       ok: true,
       state,
-      me: info ? { wid: info.wid._serialized, pushname: info.pushname } : null,
-      qr_required: !!QR_STORE.lastQr
+      me: info ? { wid: info.wid?._serialized, pushname: info.pushname } : null,
+      // qr_required true hanya jika QR masih aktif & belum authenticated
+      qr_required: !info && isQrActive()
     });
   });
 
-  // Dapatkan QR png/base64 (untuk di-scan dari HP)
   router.get('/qr', async (req, res) => {
-    if (!QR_STORE.lastQr) {
-      return res.status(204).send(); // tidak perlu QR (sudah login)
-    }
+    // jika sudah login, tidak perlu QR
+    if (client.info) return res.status(204).send();
+    // kirim QR hanya kalau masih aktif
+    if (!isQrActive()) return res.status(204).send();
+
     const png = await QRCode.toDataURL(QR_STORE.lastQr);
     res.json({ ok: true, dataURL: png, ts: QR_STORE.timestamp });
   });
+
 
   // Kirim pesan ke nomor
   router.post('/send-text', async (req, res) => {

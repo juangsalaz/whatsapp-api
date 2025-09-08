@@ -1,33 +1,59 @@
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth, MessageMedia } = pkg;
 
+const QR_TTL_MS = 2 * 60 * 1000; // 2 menit
 const QR_STORE = { lastQr: null, timestamp: null };
+
+// helper kecil
+export function isQrActive() {
+  if (!QR_STORE.lastQr) return false;
+  if (!QR_STORE.timestamp) return false;
+  return (Date.now() - QR_STORE.timestamp) < QR_TTL_MS;
+}
 
 export function createClient({ sessionDir = '.wwebjs_auth', puppeteerArgs = [], headless = true } = {}) {
   const client = new Client({
     authStrategy: new LocalAuth({ dataPath: sessionDir }),
     puppeteer: {
       headless,
-      args: puppeteerArgs
+      args: puppeteerArgs,
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined
     }
   });
 
   client.on('qr', (qr) => {
     QR_STORE.lastQr = qr;
     QR_STORE.timestamp = Date.now();
+    console.log('[wwebjs] QR updated');
+  });
+
+  client.on('authenticated', () => {
+    // sudah berhasil login → QR tidak lagi diperlukan
+    QR_STORE.lastQr = null;
+    QR_STORE.timestamp = null;
+    console.log('[wwebjs] AUTHENTICATED');
   });
 
   client.on('ready', () => {
-    QR_STORE.lastQr = null; // sudah login; QR tidak diperlukan
+    // client siap kirim/terima pesan
+    QR_STORE.lastQr = null;
+    QR_STORE.timestamp = null;
+    console.log('[wwebjs] READY');
+  });
+
+  client.on('auth_failure', (m) => {
+    console.error('[wwebjs] AUTH FAILURE:', m);
+    // biarkan generate QR baru nanti
   });
 
   client.on('disconnected', (reason) => {
-    // Biarkan whatsapp-web.js melakukan reconnect otomatis
-    console.warn('[wwebjs] disconnected:', reason);
+    console.warn('[wwebjs] DISCONNECTED:', reason);
   });
 
   return { client, QR_STORE };
 }
+
+export { QR_STORE, MessageMedia };
 
 export async function sendTextToPhone(client, phoneE164, message) {
   // phoneE164 contoh: +6281234567890
