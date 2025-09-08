@@ -50,6 +50,16 @@ export function createClient({
 
   client.on('change_state', (s) => console.log('[wwebjs] STATE', s));
 
+  client.on('authenticated', () => {
+    console.log('[wwebjs] AUTHENTICATED');
+    clearQr();
+    // Pancing WA Web lanjut loading
+    client.getChats().then(
+      () => console.log('[wwebjs] Prefetch chats ok'),
+      (e) => console.warn('[wwebjs] Prefetch chats fail:', e?.message)
+    );
+  });
+
   client.on('disconnected', (reason) => {
     console.error('[wwebjs] DISCONNECTED:', reason);
     clearQr();

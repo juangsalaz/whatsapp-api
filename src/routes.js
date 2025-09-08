@@ -6,8 +6,8 @@ import { QR_STORE } from './wwebjs.js';
 function ensureReady(client) {
   return async (req, res, next) => {
     const state = await client.getState().catch(() => null);
-    if (state !== 'CONNECTED' || !client.info) {
-      return res.status(503).json({ ok: false, error: `Client not ready (state=${state}). Scan QR atau tunggu READY.` });
+    if (state !== 'CONNECTED') {
+      return res.status(503).json({ ok: false, error: `Client not connected (state=${state}).` });
     }
     next();
   };
@@ -28,7 +28,7 @@ export function buildRouter({ client, apiKey }) {
     const info = client.info || null;
     const state = await client.getState().catch(() => null);
     // ready = CONNECTED + info sudah ada (menandakan event 'ready' sudah terjadi)
-    const ready = state === 'CONNECTED' && !!info;
+    const ready = state === 'CONNECTED';
     res.json({
       ok: true,
       state,
