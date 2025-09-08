@@ -1,17 +1,27 @@
+// src/wwebjs.js
+import fs from 'fs';
+import path from 'path';
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth, MessageMedia } = pkg;
 
-const QR_TTL_MS = 2 * 60 * 1000; // 2 menit
-const QR_STORE = { lastQr: null, timestamp: null };
+export const QR_STORE = { lastQr: null, timestamp: null };
 
-// helper kecil
-export function isQrActive() {
-  if (!QR_STORE.lastQr) return false;
-  if (!QR_STORE.timestamp) return false;
-  return (Date.now() - QR_STORE.timestamp) < QR_TTL_MS;
+function setQr(qr) {
+  QR_STORE.lastQr = qr;
+  QR_STORE.timestamp = Date.now();
+  console.log('[wwebjs] QR updated');
+}
+function clearQr() {
+  QR_STORE.lastQr = null;
+  QR_STORE.timestamp = null;
+  console.log('[wwebjs] QR cleared');
 }
 
-export function createClient({ sessionDir = '.wwebjs_auth', puppeteerArgs = [], headless = true } = {}) {
+export function createClient({
+  sessionDir = '.wwebjs_auth',
+  puppeteerArgs = [],
+  headless = true
+} = {}) {
   const client = new Client({
     authStrategy: new LocalAuth({ dataPath: sessionDir }),
     puppeteer: {
@@ -21,54 +31,52 @@ export function createClient({ sessionDir = '.wwebjs_auth', puppeteerArgs = [], 
     }
   });
 
-  client.on('qr', (qr) => {
-    QR_STORE.lastQr = qr;
-    QR_STORE.timestamp = Date.now();
-    console.log('[wwebjs] QR updated');
-  });
+  client.on('qr', setQr);
 
   client.on('authenticated', () => {
-    // sudah berhasil login → QR tidak lagi diperlukan
-    QR_STORE.lastQr = null;
-    QR_STORE.timestamp = null;
     console.log('[wwebjs] AUTHENTICATED');
+    clearQr();
   });
 
   client.on('ready', () => {
-    // client siap kirim/terima pesan
-    QR_STORE.lastQr = null;
-    QR_STORE.timestamp = null;
     console.log('[wwebjs] READY');
+    clearQr();
   });
 
   client.on('auth_failure', (m) => {
     console.error('[wwebjs] AUTH FAILURE:', m);
-    // biarkan generate QR baru nanti
+    // biarkan generate QR baru
   });
+
+  client.on('change_state', (s) => console.log('[wwebjs] STATE', s));
 
   client.on('disconnected', (reason) => {
-    console.warn('[wwebjs] DISCONNECTED:', reason);
+    console.error('[wwebjs] DISCONNECTED:', reason);
+    clearQr();
+    if (String(reason).toUpperCase().includes('LOGOUT')) {
+      try { client.destroy(); } catch {}
+      try { fs.rmSync(path.resolve(sessionDir), { recursive: true, force: true }); } catch {}
+      process.exit(1); // biar PM2 restart → QR baru terbit
+    }
   });
 
-  return { client, QR_STORE };
+  return { client, QR_STORE, MessageMedia };
 }
 
-export { QR_STORE, MessageMedia };
-
 export async function sendTextToPhone(client, phoneE164, message) {
-  // phoneE164 contoh: +6281234567890
-  const jid = phoneE164.replace(/\D/g, '') + '@c.us';
-  return client.sendMessage(jid, message); // API sendMessage resmi. :contentReference[oaicite:2]{index=2}
+  const clean = String(phoneE164).replace(/\D/g, '');
+  const numberId = await client.getNumberId(clean).catch(() => null);
+  if (!numberId) throw new Error(`Nomor ${phoneE164} tidak ditemukan / tidak terdaftar di WhatsApp`);
+  return client.sendMessage(numberId._serialized, message);
 }
 
 export async function findGroupBy({ client, groupId, groupName }) {
   if (groupId) {
-    // groupId format: 12345-67890@g.us
     const chat = await client.getChatById(groupId);
     return chat?.isGroup ? chat : null;
   }
   const chats = await client.getChats();
-  return chats.find(c => c.isGroup && c.name === groupName) || null; // GroupChat tersedia di docs. :contentReference[oaicite:3]{index=3}
+  return chats.find(c => c.isGroup && c.name === groupName) || null;
 }
 
 export async function sendTextToGroup(client, { groupId, groupName, message }) {
@@ -84,6 +92,8 @@ export async function sendMediaToTarget(client, { to, isGroup = false, base64, m
     if (!grp) throw new Error('Group not found');
     return client.sendMessage(grp.id._serialized, media);
   }
-  const jid = to.replace(/\D/g, '') + '@c.us';
-  return client.sendMessage(jid, media);
+  const clean = String(to).replace(/\D/g, '');
+  const numberId = await client.getNumberId(clean).catch(() => null);
+  if (!numberId) throw new Error(`Nomor ${to} tidak ditemukan / tidak terdaftar di WhatsApp`);
+  return client.sendMessage(numberId._serialized, media);
 }

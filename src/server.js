@@ -1,3 +1,4 @@
+// src/server.js
 import 'dotenv/config';
 import express from 'express';
 import helmet from 'helmet';
@@ -17,9 +18,8 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// Buat client wwebjs
-const { client, QR_STORE } = createClient({
-  sessionDir: process.env.WWEBJS_SESSION_DIR || '.wwebjs_auth',
+const { client } = createClient({
+  sessionDir: process.env.WWEBJS_SESSION_DIR || '/var/www/whatsapp-api/.wwebjs_auth',
   headless: process.env.PUPPETEER_HEADLESS !== 'false',
   puppeteerArgs: (process.env.PUPPETEER_ARGS || '').split(',').filter(Boolean)
 });
@@ -27,12 +27,15 @@ const { client, QR_STORE } = createClient({
 app.locals.client = client;
 app.locals.api = { sendTextToPhone, sendTextToGroup, sendMediaToTarget };
 
-// Router API
-app.use('/api', buildRouter({ client, QR_STORE, apiKey: process.env.API_KEY }));
+// log event penting
+client.on('authenticated', () => console.log('[wwebjs] AUTHENTICATED'));
+client.on('ready', () => console.log('[wwebjs] READY'));
+client.on('auth_failure', m => console.error('[wwebjs] AUTH FAILURE:', m));
+client.on('change_state', s => console.log('[wwebjs] STATE', s));
+client.on('disconnected', r => console.error('[wwebjs] DISCONNECTED', r));
+
+app.use('/api', buildRouter({ client, apiKey: process.env.API_KEY }));
 
 const PORT = process.env.PORT || 3000;
-client.initialize(); // Inisialisasi client: event `qr`/`ready`/`message` dsb. :contentReference[oaicite:4]{index=4}
-
-app.listen(PORT, () => {
-  console.log(`[http] listening on :${PORT}`);
-});
+client.initialize();                              // <-- pastikan ini dipanggil
+app.listen(PORT, () => console.log(`[http] listening on :${PORT}`));
