@@ -75,9 +75,37 @@ export function createClient({
 
 export async function sendTextToPhone(client, phoneE164, message) {
   const clean = String(phoneE164).replace(/\D/g, '');
+
+  // 1) Pastikan nomor valid & dapatkan JID resmi
   const numberId = await client.getNumberId(clean).catch(() => null);
   if (!numberId) throw new Error(`Nomor ${phoneE164} tidak ditemukan / tidak terdaftar di WhatsApp`);
-  return client.sendMessage(numberId._serialized, message);
+  const jid = numberId._serialized; // e.g. 62812xxxxx@c.us
+
+  // 2) Retry kirim kalau kena error "getChat"/evaluation (DOM WA belum siap)
+  const MAX_RETRY = 5;
+  const SLEEP_MS = 1200;
+
+  let lastErr;
+  for (let i = 0; i < MAX_RETRY; i++) {
+    try {
+      // optional: pancing WA Web “bangun”
+      await client.getState(); // noop tapi memastikan koneksi aktif
+      return await client.sendMessage(jid, message);
+    } catch (e) {
+      lastErr = e;
+      const msg = String(e?.message || e);
+      const transient =
+        msg.includes('getChat') ||
+        msg.includes('Evaluation failed') ||
+        msg.includes('Attempting to use a disconnected port');
+
+      if (!transient || i === MAX_RETRY - 1) {
+        throw e; // bukan error transien, atau sudah habis retry
+      }
+      await new Promise((r) => setTimeout(r, SLEEP_MS));
+    }
+  }
+  throw lastErr;
 }
 
 export async function findGroupBy({ client, groupId, groupName }) {

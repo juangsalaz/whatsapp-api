@@ -38,6 +38,15 @@ export function buildRouter({ client, apiKey }) {
     });
   });
 
+    router.post('/warmup', async (req, res) => {
+        try {
+            await client.getChats();
+            res.json({ ok: true });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: e.message });
+        }
+    });
+
   // QR snapshot (kalau sudah login → 204)
   router.get('/qr', async (req, res) => {
     if (client.info) return res.status(204).send();
